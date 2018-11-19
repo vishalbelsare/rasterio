@@ -327,3 +327,11 @@ def test_compound_crs():
 def test_dataset_compound_crs():
     with rasterio.open("tests/data/compdcs.vrt") as dataset:
         assert dataset.crs.wkt.startswith('GEOGCS["WGS 84"')
+
+
+def test_crs_equality_needed_env():
+    """Assert fix of issue #1553"""
+    azeq_point = CRS({'units': 'm', 'proj': 'aeqd', 'ellps': 'WGS84', 'datum': 'WGS84', 'lat_0': -17.0, 'lon_0': -44.0})
+    assert azeq_point == azeq_point
+    wgs84 = CRS.from_epsg(4326)
+    assert azeq_point != wgs84
