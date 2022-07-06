@@ -10,7 +10,6 @@
 # binary wheels.
 
 import copy
-from distutils.command.sdist import sdist
 import itertools
 import logging
 import os
@@ -20,6 +19,7 @@ import shutil
 from subprocess import check_output
 import sys
 
+from pkg_resources import parse_version
 from setuptools import setup
 from setuptools.extension import Extension
 
@@ -70,7 +70,7 @@ gdal_output = [None] * 4
 gdalversion = None
 gdal_major_version = 0
 gdal_minor_version = 0
-sdist_fill = []
+gdal_patch_version = 0
 
 try:
     import numpy as np
@@ -129,12 +129,15 @@ if "clean" not in sys.argv:
                  "to gdal-config using a GDAL_CONFIG environment variable "
                  "or use a GDAL_VERSION environment variable.")
 
-    gdal_version_parts = gdalversion.split('.')
-    gdal_major_version = int(gdal_version_parts[0])
-    gdal_minor_version = int(gdal_version_parts[1])
+    gdal_major_version, gdal_minor_version, gdal_patch_version = parse_version(
+        gdalversion
+    ).base_version.split(".", maxsplit=3)
+    gdal_major_version = int(gdal_major_version)
+    gdal_minor_version = int(gdal_minor_version)
+    gdal_patch_version = int(gdal_patch_version)
 
-    if (gdal_major_version, gdal_minor_version) < (2, 3):
-        raise SystemExit("ERROR: GDAL >= 2.3 is required for rasterio. "
+    if (gdal_major_version, gdal_minor_version) < (3, 1):
+        raise SystemExit("ERROR: GDAL >= 3.1 is required for rasterio. "
                  "Please upgrade GDAL.")
 
 # Conditionally copy the GDAL data. To be used in conjunction with
@@ -157,11 +160,10 @@ if os.environ.get('PACKAGE_DATA'):
         log.info("Copying proj_data from %s" % projdatadir)
         copy_data_tree(projdatadir, 'rasterio/proj_data')
 
-
-
 compile_time_env = {
     "CTE_GDAL_MAJOR_VERSION": gdal_major_version,
     "CTE_GDAL_MINOR_VERSION": gdal_minor_version,
+    "CTE_GDAL_PATCH_VERSION": gdal_patch_version,
 }
 
 ext_options = {
@@ -239,7 +241,9 @@ if "clean" not in sys.argv:
         Extension(
             'rasterio._example', ['rasterio/_example.pyx'], **ext_options),
         Extension(
-            'rasterio._crs', ['rasterio/_crs.pyx'], **ext_options),
+            'rasterio._version', ['rasterio/_version.pyx'], **ext_options),
+        Extension(
+            'rasterio.crs', ['rasterio/crs.pyx'], **ext_options),
         Extension(
             'rasterio.shutil', ['rasterio/shutil.pyx'], **ext_options),
         Extension(
@@ -300,10 +304,9 @@ setup_args = dict(
         "License :: OSI Approved :: BSD License",
         "Programming Language :: C",
         "Programming Language :: Cython",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3",
         "Topic :: Multimedia :: Graphics :: Graphics Conversion",
         "Topic :: Scientific/Engineering :: GIS",
@@ -315,38 +318,12 @@ setup_args = dict(
     license="BSD",
     package_dir={"": "."},
     packages=["rasterio", "rasterio.rio"],
-    entry_points="""
-        [console_scripts]
-        rio=rasterio.rio.main:main_group
-
-        [rasterio.rio_commands]
-        blocks=rasterio.rio.blocks:blocks
-        bounds=rasterio.rio.bounds:bounds
-        calc=rasterio.rio.calc:calc
-        clip=rasterio.rio.clip:clip
-        convert=rasterio.rio.convert:convert
-        edit-info=rasterio.rio.edit_info:edit
-        env=rasterio.rio.env:env
-        gcps=rasterio.rio.gcps:gcps
-        info=rasterio.rio.info:info
-        insp=rasterio.rio.insp:insp
-        mask=rasterio.rio.mask:mask
-        merge=rasterio.rio.merge:merge
-        overview=rasterio.rio.overview:overview
-        rasterize=rasterio.rio.rasterize:rasterize
-        rm=rasterio.rio.rm:rm
-        sample=rasterio.rio.sample:sample
-        shapes=rasterio.rio.shapes:shapes
-        stack=rasterio.rio.stack:stack
-        transform=rasterio.rio.transform:transform
-        warp=rasterio.rio.warp:warp
-    """,
     include_package_data=True,
     ext_modules=ext_modules,
     zip_safe=False,
     install_requires=inst_reqs,
     extras_require=extra_reqs,
-    python_requires=">=3.6",
+    python_requires=">=3.8",
 )
 
 if os.environ.get('PACKAGE_DATA'):

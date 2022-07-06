@@ -8,8 +8,6 @@ import pytest
 import rasterio
 from rasterio.env import GDALVersion
 
-from .conftest import requires_gdal21
-
 
 @pytest.mark.gdalbin
 def test_update_tags(data):
@@ -67,18 +65,6 @@ def test_update_nodata(data):
         assert f.nodatavals == (255, 255, 255)
 
 
-@pytest.mark.skipif(
-    GDALVersion.runtime().at_least('2.1'),
-    reason='Tests behavior specific to GDAL versions < 2.1')
-def test_update_nodatavals_none_fails(data):
-    """GDAL 2.0 doesn't support un-setting nodata values."""
-    tiffname = str(data.join('RGB.byte.tif'))
-    with rasterio.open(tiffname, 'r+') as f:
-        with pytest.raises(NotImplementedError):
-            f.nodata = None
-
-
-@requires_gdal21
 def test_update_nodatavals_none(data):
     """GDAL 2.1 does support un-setting nodata values."""
     tiffname = str(data.join('RGB.byte.tif'))

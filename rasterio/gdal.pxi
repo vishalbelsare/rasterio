@@ -153,9 +153,6 @@ cdef extern from "ogr_srs_api.h" nogil:
         OGRCoordinateTransformationH source)
     int OCTTransform(OGRCoordinateTransformationH ct, int nCount, double *x,
                      double *y, double *z)
-    int OSRAutoIdentifyEPSG(OGRSpatialReferenceH srs)
-    int OSRMorphFromESRI(OGRSpatialReferenceH srs)
-    int OSRMorphToESRI(OGRSpatialReferenceH srs)
     void OSRCleanup()
     OGRSpatialReferenceH OSRClone(OGRSpatialReferenceH srs)
     int OSRExportToProj4(OGRSpatialReferenceH srs, char **params)
@@ -173,32 +170,23 @@ cdef extern from "ogr_srs_api.h" nogil:
     int OSRSetFromUserInput(OGRSpatialReferenceH srs, const char *input)
     OGRErr OSRValidate(OGRSpatialReferenceH srs)
     double OSRGetLinearUnits(OGRSpatialReferenceH srs, char **ppszName)
+    double OSRGetAngularUnits(OGRSpatialReferenceH srs, char **ppszName)
     int OSREPSGTreatsAsLatLong(OGRSpatialReferenceH srs)
     int OSREPSGTreatsAsNorthingEasting(OGRSpatialReferenceH srs)
     OGRSpatialReferenceH *OSRFindMatches(OGRSpatialReferenceH srs, char **options, int *entries, int **matchConfidence)
     void OSRFreeSRSArray(OGRSpatialReferenceH *srs)
+    ctypedef enum OSRAxisMappingStrategy:
+        OAMS_TRADITIONAL_GIS_ORDER
 
-
-IF CTE_GDAL_MAJOR_VERSION >= 3:
-    cdef extern from "ogr_srs_api.h" nogil:
-
-        ctypedef enum OSRAxisMappingStrategy:
-            OAMS_TRADITIONAL_GIS_ORDER
-
-        const char* OSRGetName(OGRSpatialReferenceH hSRS)
-        void OSRSetAxisMappingStrategy(OGRSpatialReferenceH hSRS, OSRAxisMappingStrategy)
-        void OSRSetPROJSearchPaths(const char *const *papszPaths)
-        OGRErr OSRExportToWktEx(OGRSpatialReferenceH, char ** ppszResult,
+    const char* OSRGetName(OGRSpatialReferenceH hSRS)
+    void OSRSetAxisMappingStrategy(OGRSpatialReferenceH hSRS, OSRAxisMappingStrategy)
+    void OSRSetPROJSearchPaths(const char *const *papszPaths)
+    char ** OSRGetPROJSearchPaths()
+    OGRErr OSRExportToWktEx(OGRSpatialReferenceH, char ** ppszResult,
+                            const char* const* papszOptions)
+    OGRErr OSRExportToPROJJSON(OGRSpatialReferenceH hSRS,
+                                char ** ppszReturn,
                                 const char* const* papszOptions)
-ELSE:
-    cdef int OAMS_TRADITIONAL_GIS_ORDER = 0
-
-IF (CTE_GDAL_MAJOR_VERSION, CTE_GDAL_MINOR_VERSION) >= (3, 1):
-    cdef extern from "ogr_srs_api.h" nogil:
-
-        OGRErr OSRExportToPROJJSON(OGRSpatialReferenceH hSRS,
-                                   char ** ppszReturn,
-                                   const char* const* papszOptions)
 
 
 IF (CTE_GDAL_MAJOR_VERSION, CTE_GDAL_MINOR_VERSION) >= (3, 4):
@@ -237,6 +225,8 @@ cdef extern from "gdal.h" nogil:
         GDT_Int16
         GDT_UInt32
         GDT_Int32
+        GDT_UInt64
+        GDT_Int64
         GDT_Float32
         GDT_Float64
         GDT_CInt16
@@ -360,7 +350,8 @@ cdef extern from "gdal.h" nogil:
     int GDALRasterIO(GDALRasterBandH band, int, int xoff, int yoff, int xsize,
                      int ysize, void *buffer, int width, int height, int,
                      int poff, int loff)
-
+    CPLErr GDALGetRasterStatistics(GDALRasterBandH band, int approx, int force, double *min, double*max, double *mean, double *std)
+    void GDALDatasetClearStatistics(GDALDatasetH hDS)
     ctypedef struct GDALRasterIOExtraArg:
         int nVersion
         GDALRIOResampleAlg eResampleAlg
@@ -408,9 +399,6 @@ cdef extern from "gdal.h" nogil:
                            int nOverviews, int *overviews, int nBands,
                            int *bands, void *progress_func,
                            void *progress_data)
-    int GDALCheckVersion(int nVersionMajor, int nVersionMinor,
-                         const char *pszCallingComponentName)
-    const char* GDALVersionInfo(const char *pszRequest)
     CPLErr GDALSetGCPs(GDALDatasetH hDS, int nGCPCount, const GDAL_GCP *pasGCPList,
                        const char *pszGCPProjection)
     const GDAL_GCP *GDALGetGCPs(GDALDatasetH hDS)

@@ -6,11 +6,11 @@ import affine
 import numpy as np
 import pytest
 
-from .conftest import requires_gdal31
+from .conftest import requires_gdal35, gdal_version
 
 import rasterio
 from rasterio.drivers import blacklist
-from rasterio.enums import Resampling
+from rasterio.enums import MaskFlags, Resampling
 from rasterio.env import Env
 from rasterio.errors import RasterioIOError
 
@@ -431,7 +431,6 @@ def test_issue2088(tmpdir, capsys, driver):
     assert "ERROR 4" not in captured.out
 
 
-@requires_gdal31
 def test_write_cog(tmpdir, path_rgb_byte_tif):
     """Show resolution of issue #2102"""
     with rasterio.open(path_rgb_byte_tif) as src:
@@ -439,3 +438,111 @@ def test_write_cog(tmpdir, path_rgb_byte_tif):
         profile.update(driver="COG", extent=src.bounds, resampling=Resampling.bilinear)
         with rasterio.open(str(tmpdir.join("test.tif")), "w", **profile) as cog:
             cog.write(src.read())
+
+
+def test_write_masked(tmp_path):
+    """Verify that masked arrays are filled when written."""
+    data = np.ma.masked_less_equal(np.array([[0, 1, 2]], dtype="uint8"), 1)
+    data.fill_value = 3
+
+    with rasterio.open(
+        tmp_path / "test.tif",
+        "w",
+        driver="GTiff",
+        count=1,
+        width=3,
+        height=1,
+        dtype="uint8",
+    ) as dst:
+        dst.write(data, indexes=1)
+
+    # Expect the masked array's fill_value in the first two pixels.
+    with rasterio.open(tmp_path / "test.tif") as src:
+        assert src.mask_flag_enums == ([MaskFlags.all_valid],)
+        arr = src.read()
+        assert list(arr.flatten()) == [3, 3, 2]
+
+
+def test_write_masked_nodata(tmp_path):
+    """Verify that masked arrays are filled with nodata when written."""
+    data = np.ma.masked_less_equal(np.array([[0, 1, 2]], dtype="uint8"), 1)
+
+    with rasterio.open(
+        tmp_path / "test.tif",
+        "w",
+        driver="GTiff",
+        count=1,
+        width=3,
+        height=1,
+        dtype="uint8",
+        nodata=0,
+    ) as dst:
+        dst.write(data, indexes=1)
+
+    # Expect the dataset's nodata value in the first two pixels.
+    with rasterio.open(tmp_path / "test.tif") as src:
+        assert src.mask_flag_enums == ([MaskFlags.nodata],)
+        arr = src.read()
+        assert list(arr.flatten()) == [0, 0, 2]
+
+
+def test_write_masked_true(tmp_path):
+    """Verify that a mask is written when we write a masked array."""
+    data = np.ma.masked_less_equal(np.array([[0, 1, 2]], dtype="uint8"), 1)
+
+    with rasterio.open(
+        tmp_path / "test.tif",
+        "w",
+        driver="GTiff",
+        count=1,
+        width=3,
+        height=1,
+        dtype="uint8",
+    ) as dst:
+        dst.write(data, indexes=1, masked=True)
+
+    # Expect masked values in the first two pixels.
+    with rasterio.open(tmp_path / "test.tif") as src:
+        assert src.mask_flag_enums == ([MaskFlags.per_dataset],)
+        arr = src.read(masked=True)
+        assert list(arr.flatten()) == [np.ma.masked, np.ma.masked, 2]
+
+
+@requires_gdal35
+def test_write_int64(tmp_path):
+    test_file = tmp_path / "test.tif"
+    data = np.array([np.ones((100, 100), dtype=rasterio.int64) * 127])
+    with rasterio.open(
+        test_file,
+        'w',
+        driver='GTiff',
+        width=100,
+        height=100,
+        count=1,
+        dtype=data.dtype
+    ) as file:
+        file.write(data, [1])
+        assert file.dtypes == (rasterio.int64,)
+    
+    with rasterio.open(test_file) as file:
+        assert file.dtypes == (rasterio.int64,)
+
+
+@pytest.mark.skipif(
+    gdal_version.at_least('3.5'),
+    reason="Validate behavior before GDAL 3.5",
+)
+def test_write_int64__unsupported(tmp_path):
+    test_file = tmp_path / "test.tif"
+    data = np.array([np.ones((100, 100), dtype=rasterio.int64) * 127])
+    with pytest.raises(TypeError, match="invalid dtype"):
+        with rasterio.open(
+            test_file,
+            'w',
+            driver='GTiff',
+            width=100,
+            height=100,
+            count=1,
+            dtype=data.dtype
+        ) as file:
+            file.write(data, [1])

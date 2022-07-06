@@ -15,14 +15,15 @@ with rasterio._loading.add_gdal_dll_directories():
     import rasterio
     from rasterio.coords import disjoint_bounds
     from rasterio.enums import Resampling
+    from rasterio.errors import RasterioDeprecationWarning
     from rasterio import windows
     from rasterio.transform import Affine
-
 
 logger = logging.getLogger(__name__)
 
 
 def copy_first(merged_data, new_data, merged_mask, new_mask, **kwargs):
+    """Returns the first available pixel."""
     mask = np.empty_like(merged_mask, dtype="bool")
     np.logical_not(new_mask, out=mask)
     np.logical_and(merged_mask, mask, out=mask)
@@ -30,12 +31,14 @@ def copy_first(merged_data, new_data, merged_mask, new_mask, **kwargs):
 
 
 def copy_last(merged_data, new_data, merged_mask, new_mask, **kwargs):
+    """Returns the last available pixel."""
     mask = np.empty_like(merged_mask, dtype="bool")
     np.logical_not(new_mask, out=mask)
     np.copyto(merged_data, new_data, where=mask, casting="unsafe")
 
 
 def copy_min(merged_data, new_data, merged_mask, new_mask, **kwargs):
+    """Returns the minimum value pixel."""
     mask = np.empty_like(merged_mask, dtype="bool")
     np.logical_or(merged_mask, new_mask, out=mask)
     np.logical_not(mask, out=mask)
@@ -46,6 +49,7 @@ def copy_min(merged_data, new_data, merged_mask, new_mask, **kwargs):
 
 
 def copy_max(merged_data, new_data, merged_mask, new_mask, **kwargs):
+    """Returns the maximum value pixel."""
     mask = np.empty_like(merged_mask, dtype="bool")
     np.logical_or(merged_mask, new_mask, out=mask)
     np.logical_not(mask, out=mask)
@@ -55,11 +59,35 @@ def copy_max(merged_data, new_data, merged_mask, new_mask, **kwargs):
     np.copyto(merged_data, new_data, where=mask, casting="unsafe")
 
 
+def copy_sum(merged_data, new_data, merged_mask, new_mask, **kwargs):
+    """Returns the sum of all pixel values."""
+    mask = np.empty_like(merged_mask, dtype="bool")
+    np.logical_or(merged_mask, new_mask, out=mask)
+    np.logical_not(mask, out=mask)
+    np.add(merged_data, new_data, out=merged_data, where=mask, casting="unsafe")
+    np.logical_not(new_mask, out=mask)
+    np.logical_and(merged_mask, mask, out=mask)
+    np.copyto(merged_data, new_data, where=mask, casting="unsafe")
+
+
+def copy_count(merged_data, new_data, merged_mask, new_mask, **kwargs):
+    """Returns the count of valid pixels."""
+    mask = np.empty_like(merged_mask, dtype="bool")
+    np.logical_or(merged_mask, new_mask, out=mask)
+    np.logical_not(mask, out=mask)
+    np.add(merged_data, mask, out=merged_data, where=mask, casting="unsafe")
+    np.logical_not(new_mask, out=mask)
+    np.logical_and(merged_mask, mask, out=mask)
+    np.copyto(merged_data, mask, where=mask, casting="unsafe")
+
+
 MERGE_METHODS = {
-    'first': copy_first,
-    'last': copy_last,
-    'min': copy_min,
-    'max': copy_max
+    "first": copy_first,
+    "last": copy_last,
+    "min": copy_min,
+    "max": copy_max,
+    "sum": copy_sum,
+    "count": copy_count,
 }
 
 
@@ -108,8 +136,9 @@ def merge(
     dtype: numpy dtype or string
         dtype to use in outputfile. If not set, uses the dtype value in the
         first input raster.
-    precision: float, optional
-        Number of decimal points of precision when computing inverse transform.
+    precision: int, optional
+        This parameters is unused, deprecated in rasterio 1.3.0, and
+        will be removed in version 2.0.0.
     indexes : list of ints or a single int, optional
         bands to read and merge
     output_count: int, optional
@@ -164,6 +193,12 @@ def merge(
                 coordinate system
 
     """
+    if precision is not None:
+        warnings.warn(
+            "The precision parameter is unused, deprecated, and will be removed in 2.0.0.",
+            RasterioDeprecationWarning,
+        )
+
     if method in MERGE_METHODS:
         copyto = MERGE_METHODS[method]
     elif callable(method):
@@ -253,6 +288,7 @@ def merge(
     out_profile["height"] = output_height
     out_profile["width"] = output_width
     out_profile["count"] = output_count
+    out_profile["dtype"] = dt
     if nodata is not None:
         out_profile["nodata"] = nodata
 
@@ -305,13 +341,11 @@ def merge(
             int_n = src_n if src_n < dst_n else dst_n
 
             # 2. Compute the source window
-            src_window = windows.from_bounds(
-                int_w, int_s, int_e, int_n, src.transform, precision=precision
-            )
+            src_window = windows.from_bounds(int_w, int_s, int_e, int_n, src.transform)
 
             # 3. Compute the destination window
             dst_window = windows.from_bounds(
-                int_w, int_s, int_e, int_n, output_transform, precision=precision
+                int_w, int_s, int_e, int_n, output_transform
             )
 
             # 4. Read data in source window into temp

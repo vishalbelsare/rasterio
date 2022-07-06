@@ -33,10 +33,6 @@ issues to one of the following trackers:
 - https://github.com/ContinuumIO/anaconda-issues/issues
 - https://github.com/conda-forge/rasterio-feedstock
 
-Also please note: we are currently working on 1.0 and pre-releases. Bugs found
-in version 0.36 will not be fixed except in a 1.0 alpha or beta release. In 
-some cases, 0.36 bugs have already been fixed in recent pre-releases.
-
 You think you've found a bug? We believe you!
 -->
 
@@ -48,10 +44,16 @@ For example: I expected to read a band from a file and an exception occurred.
 
 For example: a brief script with required inputs.
 
-## Operating system
+#### Environment Information
+<!-- If you have rasterio>=1.3.0 -->
+ - Output from: `rio --show-versions` or `python -c "import rasterio; rasterio.show_versions()"`
+<!-- If you have rasterio<1.3.0 -->
+ - rasterio version (`python -c "import rasterio; print(rasterio.__version__)"`)
+ - GDAL version (`python -c "import rasterio; print(rasterio.__gdal_version__)"`)
+ - Python version (`python -c "import sys; print(sys.version.replace('\n', ' '))"`)
+ - Operation System Information (`python -c "import platform; print(platform.platform())"`)
 
-For example: Mac OS X 10.12.3.
 
-## Rasterio version and provenance
+## Installation Method
 
 For example: the 1.0a11 manylinux1 wheel installed from PyPI using pip 9.0.1.

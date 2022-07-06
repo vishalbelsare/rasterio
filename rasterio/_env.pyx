@@ -17,9 +17,10 @@ import os.path
 import sys
 import threading
 
-from rasterio._base cimport _safe_osr_release
 from rasterio._err import CPLE_BaseError
 from rasterio._err cimport exc_wrap_ogrerr, exc_wrap_int
+from rasterio._filepath cimport install_filepath_plugin, uninstall_filepath_plugin
+from rasterio._version import gdal_version
 
 from libc.stdio cimport stderr
 
@@ -55,11 +56,15 @@ log = logging.getLogger(__name__)
 
 try:
     import certifi
-    os.environ.setdefault("CURL_CA_BUNDLE", certifi.where())
+    ca_bundle = certifi.where()
+    os.environ.setdefault("GDAL_CURL_CA_BUNDLE", ca_bundle)
+    os.environ.setdefault("PROJ_CURL_CA_BUNDLE", ca_bundle)
 except ImportError:
     pass
 
 cdef bint is_64bit = sys.maxsize > 2 ** 32
+
+cdef VSIFilesystemPluginCallbacksStruct* filepath_plugin = NULL
 
 
 cdef void log_error(CPLErr err_class, int err_no, const char* msg) with gil:
@@ -267,7 +272,7 @@ class GDALDataFinder:
 
     def search_debian(self, prefix=sys.prefix):
         """Check Debian locations"""
-        gdal_release_name = GDALVersionInfo("RELEASE_NAME")
+        gdal_release_name = gdal_version()
         datadir = os.path.join(prefix, 'share', 'gdal', '{}.{}'.format(*gdal_release_name.split('.')[:2]))
         return datadir if os.path.exists(os.path.join(datadir, 'header.dxf')) else None
 
@@ -306,7 +311,8 @@ class PROJDataFinder:
         else:
             return True
         finally:
-            _safe_osr_release(osr)
+            if osr != NULL:
+                OSRRelease(osr)
 
 
     def search(self, prefix=None):
@@ -351,11 +357,13 @@ cdef class GDALEnv(ConfigEnv):
         # lock when the environment starts, and the inner avoids a
         # potential race condition.
         if not self._have_registered_drivers:
-            with threading.Lock():
-                if not self._have_registered_drivers:
 
+            with threading.Lock():
+
+                if not self._have_registered_drivers:
                     GDALAllRegister()
                     OGRRegisterAll()
+                    install_filepath_plugin(filepath_plugin)
 
                     if 'GDAL_DATA' in os.environ:
                         log.debug("GDAL_DATA found in environment.")
@@ -439,12 +447,42 @@ cdef class GDALEnv(ConfigEnv):
 
 def set_proj_data_search_path(path):
     """Set PROJ data search path"""
-    IF CTE_GDAL_MAJOR_VERSION >= 3:
-        cdef char **paths = NULL
-        cdef const char *path_c = NULL
-        path_b = path.encode("utf-8")
-        path_c = path_b
-        paths = CSLAddString(paths, path_c)
-        OSRSetPROJSearchPaths(<const char *const *>paths)
-    ELSE:
-        os.environ["PROJ_LIB"] = path
+    cdef char **paths = NULL
+    cdef const char *path_c = NULL
+    path_b = path.encode("utf-8")
+    path_c = path_b
+    paths = CSLAddString(paths, path_c)
+    OSRSetPROJSearchPaths(<const char *const *>paths)
+
+
+def get_proj_data_search_paths():
+    """
+    Get the PROJ DATA search paths
+
+    Requires GDAL 3.0.3+
+
+    Returns
+    -------
+    List[str]
+    """
+    path_list = []
+    cdef char **paths = OSRGetPROJSearchPaths()
+    cdef int iii = 0
+    while paths[iii] != NULL:
+        path_list.append(paths[iii])
+        iii += 1
+    return path_list
+
+
+def get_gdal_data():
+    """
+    Get the GDAL DATA path
+
+    Returns
+    -------
+    str
+    """
+    cdef const char *gdal_data = CPLGetConfigOption("GDAL_DATA", NULL)
+    if gdal_data != NULL:
+        return gdal_data
+    return None

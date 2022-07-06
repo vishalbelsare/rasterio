@@ -10,29 +10,18 @@ with rasterio._loading.add_gdal_dll_directories():
     import rasterio
 
     from rasterio._base import _transform
+    from rasterio.crs import CRS
     from rasterio.enums import Resampling
-    from rasterio.env import GDALVersion, ensure_env, require_gdal_version
-    from rasterio.errors import GDALBehaviorChangeException, TransformError
+    from rasterio.env import ensure_env, require_gdal_version
+    from rasterio.errors import TransformError, RPCError
     from rasterio.transform import array_bounds
     from rasterio._warp import (
         _calculate_default_transform,
         _reproject,
         _transform_bounds,
         _transform_geom,
+        SUPPORTED_RESAMPLING
     )
-
-# Gauss (7) is not supported for warp
-SUPPORTED_RESAMPLING = [r for r in Resampling if r.value < 7]
-GDAL2_RESAMPLING = [r for r in Resampling if r.value > 7 and r.value <= 12]
-if GDALVersion.runtime().at_least('2.0'):
-    SUPPORTED_RESAMPLING.extend(GDAL2_RESAMPLING)
-# sum supported since GDAL 3.1
-if GDALVersion.runtime().at_least('3.1'):
-    SUPPORTED_RESAMPLING.append(Resampling.sum)
-# rms supported since GDAL 3.3
-if GDALVersion.runtime().at_least('3.3'):
-    SUPPORTED_RESAMPLING.append(Resampling.rms)
-
 
 @ensure_env
 def transform(src_crs, dst_crs, xs, ys, zs=None):
@@ -157,6 +146,8 @@ def transform_bounds(
     left, bottom, right, top: float
         Outermost coordinates in target coordinate reference system.
     """
+    src_crs = CRS.from_user_input(src_crs)
+    dst_crs = CRS.from_user_input(dst_crs)
     return _transform_bounds(
         src_crs,
         dst_crs,
@@ -169,7 +160,6 @@ def transform_bounds(
 
 
 @ensure_env
-@require_gdal_version('2.0', param='resampling', values=GDAL2_RESAMPLING)
 def reproject(source, destination=None, src_transform=None, gcps=None, rpcs=None,
               src_crs=None, src_nodata=None, dst_transform=None, dst_crs=None,
               dst_nodata=None, dst_resolution=None, src_alpha=0, dst_alpha=0,
@@ -258,7 +248,10 @@ def reproject(source, destination=None, src_transform=None, gcps=None, rpcs=None
         raster to a destination of the same size is approximately
         56 MB. The default (0) means 64 MB with GDAL 2.2.
     kwargs:  dict, optional
-        Additional arguments passed to transformation function.
+        Additional arguments passed to both the image to image
+        transformer :cpp:func:`GDALCreateGenImgProjTransformer2` (for example,
+        MAX_GCP_ORDER=2) and the :cpp:struct:`GDALWarpOptions` (for example,
+        INIT_DEST=NO_DATA).
 
     Returns
     ---------
@@ -312,12 +305,21 @@ def reproject(source, destination=None, src_transform=None, gcps=None, rpcs=None
 
             src_crs = src_crs or src_rdr.crs
 
+            # raise exception when reprojecting with rpcs using a CRS that is not EPSG:4326
+            if rpcs:
+                if isinstance(src_crs, str):
+                    src_crs_obj = rasterio.crs.CRS.from_string(src_crs)
+                else:
+                    src_crs_obj = src_crs
+                if src_crs is not None and src_crs_obj.to_epsg() != 4326:
+                    raise RPCError("Reprojecting with rational polynomial coefficients using source CRS other than EPSG:4326")
+
             if isinstance(src_bidx, int):
                 src_bidx = [src_bidx]
 
             src_count = len(src_bidx)
             src_height, src_width = src_shape
-            gcps = src_rdr.gcps[0] if src_rdr.gcps[0] else None
+            gcps = src_rdr.gcps[0] if src_rdr.gcps[0] and not rpcs else None
 
         dst_height = None
         dst_width = None

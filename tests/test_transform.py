@@ -10,7 +10,6 @@ import numpy
 
 import rasterio
 from rasterio import transform
-from rasterio.env import GDALVersion
 from rasterio.transform import (
     get_transformer,
     xy, 
@@ -23,8 +22,6 @@ from rasterio.errors import TransformError
 from rasterio.windows import Window
 from rasterio.control import GroundControlPoint
 
-
-gdal_version = GDALVersion.runtime()
 
 def gcps():
     return [
@@ -109,34 +106,6 @@ def test_affine_roundtrip(tmpdir):
 
     with rasterio.open(output) as out:
         assert out.transform == out_affine
-
-
-@pytest.mark.skipif(
-    gdal_version.at_least('2.3'),
-    reason="Test only applicable to GDAL < 2.3")
-def test_affine_identity(tmpdir):
-    """
-    Setting a transform with absolute values equivalent to Affine.identity()
-    should result in a warning (not captured here) and read with
-    affine that matches Affine.identity().
-    """
-
-    output = str(tmpdir.join('test.tif'))
-    out_affine = Affine(1, 0, 0, 0, -1, 0)
-
-    with rasterio.open(
-        output, 'w',
-        driver='GTiff',
-        count=1,
-        dtype=rasterio.uint8,
-        width=1,
-        height=1,
-        transform=out_affine
-    ) as out:
-        assert out.transform == out_affine
-
-    with rasterio.open(output) as out:
-        assert out.transform == Affine.identity()
 
 
 def test_from_bounds_two():
@@ -401,3 +370,11 @@ def test_dataset_mixins(dataset, transform_method, expected):
     with rasterio.open(dataset) as src:
         assert src.xy(0, 0, transform_method=transform_method) == pytest.approx(expected)
         assert src.index(*expected, transform_method=transform_method) == (0, 0)
+
+def test_2421_rpc_height_ignored():
+    transform_method = rasterio.enums.TransformMethod.rpcs
+    with rasterio.open("tests/data/RGB.byte.rpc.vrt") as src:
+        x1, y1 = src.xy(0, 0, z=0, transform_method=transform_method)
+        x2, y2 = src.xy(0, 0, z=2000, transform_method=transform_method)
+        assert abs(x2 - x1) > 0
+        assert abs(y2 - y1) > 0

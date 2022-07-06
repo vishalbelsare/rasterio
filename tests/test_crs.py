@@ -15,15 +15,6 @@ from rasterio.enums import WktVersion
 from rasterio.env import env_ctx_if_needed, Env
 from rasterio.errors import CRSError
 
-from .conftest import (
-    gdal_version,
-    requires_gdal21,
-    requires_gdal22,
-    requires_gdal_lt_3,
-    requires_gdal3,
-    requires_gdal31,
-)
-
 # Items like "D_North_American_1983" characterize the Esri dialect
 # of WKT SRS.
 ESRI_PROJECTION_STRING = (
@@ -83,23 +74,10 @@ def test_read_epsg():
         assert src.crs.to_epsg() == 32618
 
 
-@requires_gdal_lt_3
-def test_read_esri_wkt():
-    with rasterio.open('tests/data/test_esri_wkt.tif') as src:
-        assert 'PROJCS["USA_Contiguous_Albers_Equal_Area_Conic_USGS_version",' in src.crs.wkt
-        assert 'GEOGCS["GCS_North_American_1983",DATUM["D_North_American_1983",' in src.crs.wkt
-        assert src.crs.to_dict() == {
-            'datum': 'NAD83',
-            'lat_0': 23,
-            'lat_1': 29.5,
-            'lat_2': 45.5,
-            'lon_0': -96,
-            'no_defs': True,
-            'proj': 'aea',
-            'units': 'm',
-            'x_0': 0,
-            'y_0': 0,
-        }
+def test_read_compdcs():
+    """Expect no match for a single EPSG for this COMPDCS"""
+    with rasterio.open('zip://tests/data/ak-compdcs.zip!test.tif') as src:
+        assert src.crs.to_epsg() == None
 
 
 def test_read_no_crs():
@@ -162,6 +140,12 @@ def test_from_epsg_string():
         assert CRS.from_string('epsg:xyz')
 
 
+def test_from_epsg_overflow():
+    with pytest.raises(CRSError):
+        # the argument is large enough to cause an overflow in Cython
+        CRS.from_epsg(1111111111111111111111)
+
+
 def test_from_string():
     wgs84_crs = CRS.from_string('+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs')
     assert wgs84_crs.to_dict() == {'init': 'epsg:4326'}
@@ -197,13 +181,11 @@ def test_is_projected():
     assert CRS(wgs84_crs).is_projected is False
 
 
-@requires_gdal21(reason="CRS equality is buggy pre-2.1")
 @pytest.mark.parametrize('epsg_code', [3857, 4326, 26913, 32618])
 def test_equality_from_epsg(epsg_code):
     assert CRS.from_epsg(epsg_code) == CRS.from_epsg(epsg_code)
 
 
-@requires_gdal21(reason="CRS equality is buggy pre-2.1")
 @pytest.mark.parametrize('epsg_code', [3857, 4326, 26913, 32618])
 def test_equality_from_dict(epsg_code):
     assert CRS.from_dict(init='epsg:{}'.format(epsg_code)) == CRS.from_dict(init='epsg:{}'.format(epsg_code))
@@ -273,8 +255,6 @@ def test_can_create_osr_invalid(arg):
         assert not _can_create_osr(arg)
 
 
-@requires_gdal22(
-    reason="GDAL bug resolved in 2.2+ allowed invalid CRS to be created")
 def test_can_create_osr_invalid_epsg_0():
     assert not _can_create_osr('epsg:')
 
@@ -334,7 +314,6 @@ def test_safe_osr_release(tmpdir):
     assert "Pointer 'hSRS' is NULL in 'OSRRelease'" not in log
 
 
-@requires_gdal21(reason="CRS equality is buggy pre-2.1")
 def test_from_wkt():
     wgs84 = CRS.from_string('+proj=longlat +datum=WGS84 +no_defs')
     from_wkt = CRS.from_wkt(wgs84.wkt)
@@ -350,52 +329,19 @@ def test_from_user_input_epsg():
     assert 'init' in CRS.from_user_input('epsg:4326')
 
 
-@requires_gdal_lt_3
-@pytest.mark.parametrize('projection_string', [ESRI_PROJECTION_STRING])
-def test_from_esri_wkt_no_fix(projection_string):
-    """Test ESRI CRS morphing with no datum fixing"""
-    with Env():
-        crs = CRS.from_wkt(projection_string)
-        assert 'DATUM["D_North_American_1983"' in crs.wkt
-
-
-@requires_gdal_lt_3
-@pytest.mark.parametrize('projection_string', [ESRI_PROJECTION_STRING])
-def test_from_esri_wkt_fix_datum(projection_string):
-    """Test ESRI CRS morphing with datum fixing"""
-    with Env(GDAL_FIX_ESRI_WKT='DATUM'):
-        crs = CRS.from_wkt(projection_string, morph_from_esri_dialect=True)
-        assert 'DATUM["North_American_Datum_1983"' in crs.wkt
-
-
-@requires_gdal_lt_3
-def test_to_esri_wkt_fix_datum():
-    """Morph to Esri form"""
-    assert 'DATUM["D_North_American_1983"' in CRS(init='epsg:26913').to_wkt(morph_to_esri_dialect=True)
-
-
-@requires_gdal3
 @pytest.mark.parametrize("version", ["WKT2_2019", WktVersion.WKT2_2019])
 def test_to_wkt__version(version):
     assert CRS.from_epsg(4326).to_wkt(version=version).startswith('GEOGCRS["WGS 84",')
 
 
-@requires_gdal3
 def test_to_wkt__env_version():
     with Env(OSR_WKT_FORMAT="WKT2_2018"):
         assert CRS.from_epsg(4326).to_wkt().startswith('GEOGCRS["WGS 84",')
 
 
-@requires_gdal3
 def test_to_wkt__version_invalid():
     with pytest.raises(ValueError):
         CRS.from_epsg(4326).to_wkt(version="INVALID")
-
-
-@requires_gdal_lt_3
-def test_to_wkt__version__warning_gdal2():
-    with pytest.warns(UserWarning):
-        CRS.from_epsg(4326).to_wkt(version=WktVersion.WKT2_2019)
 
 
 def test_compound_crs():
@@ -430,12 +376,6 @@ def test_exception_proj4():
 
 
 @pytest.mark.parametrize('projection_string', [ESRI_PROJECTION_STRING])
-def test_crs_private_wkt(projection_string):
-    """Original WKT is saved"""
-    CRS.from_wkt(projection_string)._wkt == projection_string
-
-
-@pytest.mark.parametrize('projection_string', [ESRI_PROJECTION_STRING])
 def test_implicit_proj_dict(projection_string):
     """Ensure that old behavior is preserved"""
     assert CRS.from_wkt(projection_string)['proj'] == 'aea'
@@ -459,22 +399,6 @@ def test_issue1609_wktext_a():
     wkt = CRS(src_proj).wkt
     assert 'PROJECTION["Polar_Stereographic"]' in wkt
     assert 'PARAMETER["latitude_of_origin",-70]' in wkt
-
-
-@requires_gdal_lt_3
-def test_issue1609_wktext_b():
-    """Check on fix of issue 1609"""
-    dst_proj = {'ellps': 'WGS84',
-               'h': 9000000.0,
-               'lat_0': -78.0,
-               'lon_0': 0.0,
-               'proj': 'nsper',
-               'units': 'm',
-               'x_0': 0,
-               'y_0': 0,
-               'wktext': True}
-    wkt = CRS(dst_proj).wkt
-    assert '+wktext' in wkt
 
 
 def test_empty_crs_str():
@@ -512,6 +436,14 @@ def test_linear_units_factor():
         CRS.from_epsg(4326).linear_units_factor
 
 
+@pytest.mark.parametrize("epsg_code, units_factor", [
+    (3857, ("metre", 1.0)),
+    (4326, ("degree", pytest.approx(0.017453292519943295))),
+])
+def test_units_factor(epsg_code, units_factor):
+    assert CRS.from_epsg(epsg_code).units_factor == units_factor
+
+
 def test_crs_copy():
     """CRS can be copied"""
     assert copy.copy(CRS.from_epsg(3857)).wkt.startswith('PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84"')
@@ -547,12 +479,7 @@ def test_from_user_input_custom_crs_class():
     "crs_obj",
     [
         CRS.from_user_input("http://www.opengis.net/def/crs/EPSG/0/4326"),
-        pytest.param(
-            CRS.from_epsg(4326),
-            marks=pytest.mark.xfail(
-                gdal_version.major < 3, reason="GDAL 2 always returns False"
-            ),
-        ),
+        CRS.from_epsg(4326),
     ],
 )
 def test_epsg_treats_as_latlong(crs_obj):
@@ -578,12 +505,7 @@ def test_epsg_treats_as_latlong_not(crs_obj):
     "crs_obj",
     [
         CRS.from_user_input("http://www.opengis.net/def/crs/EPSG/0/2193"),
-        pytest.param(
-            CRS.from_epsg(2193),
-            marks=pytest.mark.xfail(
-                gdal_version.major < 3, reason="GDAL 2 always returns False"
-            ),
-        ),
+        CRS.from_epsg(2193),
     ],
 )
 def test_epsg_treats_as_northingeasting(crs_obj):
@@ -634,17 +556,14 @@ def test_from_string__wkt_with_proj():
     assert CRS.from_string(wkt).to_epsg() == 3857
 
 
-@requires_gdal3
 def test_esri_auth__from_string():
     assert CRS.from_string('ESRI:54009').to_string() == 'ESRI:54009'
 
 
-@requires_gdal3
 def test_esri_auth__to_epsg():
     assert CRS.from_user_input('ESRI:54009').to_epsg() is None
 
 
-@requires_gdal3
 def test_esri_auth__to_authority():
     assert CRS.from_user_input('ESRI:54009').to_authority() == ('ESRI', '54009')
 
@@ -685,22 +604,12 @@ def test_is_northingeasting(crs_obj, result):
     assert epsg_treats_as_northingeasting(crs_obj) == result
 
 
-@requires_gdal_lt_3
-@pytest.mark.parametrize('crs_obj', [CRS.from_epsg(4326), CRS.from_epsg(2193)])
-def test_latlong_northingeasting_gdal2(crs_obj):
-    """Check CRS created from epsg with GDAL 2 always return False."""
-    assert not epsg_treats_as_latlong(crs_obj)
-    assert not epsg_treats_as_northingeasting(crs_obj)
-
-
-@requires_gdal3
 def test_latlong_northingeasting_gdal3():
     """Check CRS created from epsg with GDAL 3."""
     assert epsg_treats_as_latlong(CRS.from_epsg(4326))
     assert epsg_treats_as_northingeasting(CRS.from_epsg(2193))
 
 
-@requires_gdal3
 def test_tmerc_no_match():
     """Should not match an authority, see issue #2293."""
     s = "+proj=tmerc +lat_0=0 +lon_0=10.7584 +k=0.9996 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
@@ -708,44 +617,41 @@ def test_tmerc_no_match():
     assert crs.to_epsg() is None
 
 
-@requires_gdal31
 def test_crs_to_json_dict():
     aeqd_crs = CRS(proj="aeqd", lon_0=-80, lat_0=40.5)
     json_dict = aeqd_crs.to_dict(projjson=True)
     assert json_dict["type"] == "ProjectedCRS"
 
 
-@requires_gdal31
 def test_crs_to_json_dict__empty():
     crs = CRS()
     assert crs.to_dict(projjson=True) == {}
 
 
-@requires_gdal31
 def test_crs_from_json_dict():
     aeqd_crs = CRS(proj="aeqd", lon_0=-80, lat_0=40.5)
     assert CRS.from_dict(aeqd_crs.to_dict(projjson=True)) == aeqd_crs
 
 
-@requires_gdal31
 def test_crs_from_json_dict__user_input():
     aeqd_crs = CRS(proj="aeqd", lon_0=-80, lat_0=40.5)
     assert CRS.from_user_input(aeqd_crs.to_dict(projjson=True)) == aeqd_crs
 
 
-@requires_gdal31
 def test_crs_from_json_dict__init():
     aeqd_crs = CRS(proj="aeqd", lon_0=-80, lat_0=40.5)
     assert CRS(aeqd_crs.to_dict(projjson=True)) == aeqd_crs
 
 
-@requires_gdal31
 def test_crs_proj_json__user_input():
     aeqd_crs = CRS(proj="aeqd", lon_0=-80, lat_0=40.5)
     assert CRS.from_user_input(json.dumps(aeqd_crs.to_dict(projjson=True))) == aeqd_crs
 
 
-@requires_gdal31
 def test_crs_proj_json__from_string():
     aeqd_crs = CRS(proj="aeqd", lon_0=-80, lat_0=40.5)
     assert CRS.from_string(json.dumps(aeqd_crs.to_dict(projjson=True))) == aeqd_crs
+
+
+def test_crs_compound_epsg():
+    assert CRS.from_string("EPSG:4326+3855").to_wkt().startswith("COMPD")

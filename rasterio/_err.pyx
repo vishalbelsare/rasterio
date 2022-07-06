@@ -148,12 +148,12 @@ cdef inline object exc_check():
 
     err_type = CPLGetLastErrorType()
     err_no = CPLGetLastErrorNo()
-    err_msg = CPLGetLastErrorMsg()
+    msg_c = CPLGetLastErrorMsg()
 
-    if err_msg == NULL:
+    if msg_c == NULL:
         msg = "No error message."
     else:
-        msg_b = err_msg
+        msg_b = msg_c
         msg = msg_b.decode('utf-8')
         msg = msg.replace("`", "'")
         msg = msg.replace("\n", " ")
@@ -161,16 +161,14 @@ cdef inline object exc_check():
     if err_type == 3:
         exception = exception_map.get(err_no, CPLE_BaseError)(err_type, err_no, msg)
         CPLErrorReset()
-        raise exception
-
-    if err_type == 4:
+        return exception
+    elif err_type == 4:
         exception = SystemExit("Fatal error: {0}".format((err_type, err_no, msg)))
         CPLErrorReset()
-        raise exception
-
+        return exception
     else:
         CPLErrorReset()
-        return
+        return None
 
 
 cdef int exc_wrap(int retval) except -1:
@@ -191,6 +189,7 @@ cdef int exc_wrap_int(int err) except -1:
         exc = exc_check()
         if exc:
             raise exc
+    CPLErrorReset()
     return err
 
 
@@ -200,6 +199,7 @@ cdef OGRErr exc_wrap_ogrerr(OGRErr err) except -1:
 
     """
     if err == 0:
+        CPLErrorReset()
         return err
     else:
         raise CPLE_BaseError(3, err, "OGR Error code {}".format(err))
@@ -215,6 +215,7 @@ cdef void *exc_wrap_pointer(void *ptr) except NULL:
         exc = exc_check()
         if exc:
             raise exc
+    CPLErrorReset()
     return ptr
 
 
@@ -228,4 +229,5 @@ cdef VSILFILE *exc_wrap_vsilfile(VSILFILE *vsifile) except NULL:
         exc = exc_check()
         if exc:
             raise exc
+    CPLErrorReset()
     return vsifile
